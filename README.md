@@ -98,16 +98,16 @@ USAGE:
 COMMANDS:
 
   Assembly and Execution:  
-    ./tiny8vm\_r26 \<program.asm\> \[options\]  
+    ./tiny8vm \<program.asm\> \[options\]  
         Assemble and run a program from source  
         Options: \--trace  \--disasm  \--debug  \--stats
 
   ROM Operations:  
-    ./tiny8vm\_r26 \--makerom \<input.asm\> \<output.rom\> \[start\] \[end\]  
+    ./tiny8vm \--makerom \<input.asm\> \<output.rom\> \[start\] \[end\]  
         Assemble source and create ROM image  
         Defaults: start=$C000, end=$FFEF  
         Example: ./tiny8vm\_r26 \--makerom kernel.asm kernel.rom  
-    ./tiny8vm\_r26 \--rom \<rom.bin\> \[options\]  
+    ./tiny8vm \--rom \<rom.bin\> \[options\]  
         Load and execute a ROM image  
         Options: \--trace  \--stats
 
