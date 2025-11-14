@@ -1218,6 +1218,10 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
     CondState cond_stack[16];
     int cond_depth = 0;
 
+    /* SECURITY FIX: Track total macro expansions to prevent resource exhaustion */
+    int total_macro_expansions = 0;
+    const int MAX_MACRO_EXPANSIONS = 10000;  /* Limit total expansions */
+
 
     /* First pass: split into lines and expand .INCLUDE */
     for (char* s = strtok(copy, "\n"); s; s = strtok(NULL, "\n")) {
@@ -1639,13 +1643,22 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         if (sscanf(line, "%63s", mnem_check) == 1) {
             Macro* m = find_macro(macros, macro_count, mnem_check);
             if (m) {
+                /* SECURITY FIX: Check macro expansion limit */
+                total_macro_expansions++;
+                if (total_macro_expansions > MAX_MACRO_EXPANSIONS) {
+                    report_error((const char**)lines, i+1,
+                                 "macro expansion limit exceeded (possible recursion)");
+                    for (int k = 0; k < nlines; k++) free(lines[k]);
+                    free(lines); free(copy); return 0;
+                }
+
                 char* args_start = strchr(line, ' ');
                 int expanded_count = 0;
                 char* expanded = expand_macro(m, args_start ? args_start + 1 : "", &expanded_count);
-                
+
                 if (!expanded) {
                     char err_msg[128];
-                    snprintf(err_msg, sizeof(err_msg), "macro %s expects %d arguments", 
+                    snprintf(err_msg, sizeof(err_msg), "macro %s expects %d arguments",
                             m->name, m->param_count);
                     report_error((const char**)lines, i+1, err_msg);
                     for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2453,13 +2466,22 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         if (sscanf(line, "%63s", mnem_check) == 1) {
             Macro* m = find_macro(macros, macro_count, mnem_check);
             if (m) {
+                /* SECURITY FIX: Check macro expansion limit */
+                total_macro_expansions++;
+                if (total_macro_expansions > MAX_MACRO_EXPANSIONS) {
+                    report_error((const char**)lines, i+1,
+                                 "macro expansion limit exceeded (possible recursion)");
+                    for (int k = 0; k < nlines; k++) free(lines[k]);
+                    free(lines); free(copy); return 0;
+                }
+
                 char* args_start = strchr(line, ' ');
                 int expanded_count = 0;
                 char* expanded = expand_macro(m, args_start ? args_start + 1 : "", &expanded_count);
-                
+
                 if (!expanded) {
                     char err_msg[128];
-                    snprintf(err_msg, sizeof(err_msg), "macro %s expects %d arguments", 
+                    snprintf(err_msg, sizeof(err_msg), "macro %s expects %d arguments",
                             m->name, m->param_count);
                     report_error((const char**)lines, i+1, err_msg);
                     for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -3264,11 +3286,19 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         }
     }
 
+    /* SECURITY FIX: Free all allocated macro bodies to prevent memory leak */
+    for (int m = 0; m < macro_count; m++) {
+        if (macros[m].body) {
+            free(macros[m].body);
+            macros[m].body = NULL;
+        }
+    }
+
     for (int i = 0; i < nlines; i++) {
         free(lines[i]);
     }
-    free(lines); 
-    free(copy);    
+    free(lines);
+    free(copy);
 
     return 1;
 
