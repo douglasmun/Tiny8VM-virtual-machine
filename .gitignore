@@ -1,0 +1,25 @@
+# Compiled binaries
+tiny8vm
+*.o
+*.out
+*.exe
+
+# Test output directories (created by test scripts)
+security_tests/
+stress_tests/
+
+# Editor and IDE files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.rom
+*.bin
+/tmp/
