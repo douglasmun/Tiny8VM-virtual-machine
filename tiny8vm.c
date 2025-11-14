@@ -489,8 +489,18 @@ static int eval_expr(const char* s, uint32_t* result, Label* labels, int nl,
                 if (strcmp(op, "|") == 0) { *result = lval | rval; return 1; }
                 if (strcmp(op, "^") == 0) { *result = lval ^ rval; return 1; }
                 if (strcmp(op, "&") == 0) { *result = lval & rval; return 1; }
-                if (strcmp(op, "<<") == 0) { *result = lval << rval; return 1; }
-                if (strcmp(op, ">>") == 0) { *result = lval >> rval; return 1; }
+                if (strcmp(op, "<<") == 0) {
+                    /* SECURITY FIX: Prevent undefined behavior from excessive shift */
+                    if (rval >= 32) { snprintf(err, 256, "left shift amount too large (%u >= 32)", rval); return 0; }
+                    *result = lval << rval;
+                    return 1;
+                }
+                if (strcmp(op, ">>") == 0) {
+                    /* SECURITY FIX: Prevent undefined behavior from excessive shift */
+                    if (rval >= 32) { snprintf(err, 256, "right shift amount too large (%u >= 32)", rval); return 0; }
+                    *result = lval >> rval;
+                    return 1;
+                }
                 if (strcmp(op, "+") == 0) { *result = lval + rval; return 1; }
                 if (strcmp(op, "-") == 0) { *result = lval - rval; return 1; }
                 if (strcmp(op, "*") == 0) { *result = lval * rval; return 1; }
@@ -1032,6 +1042,12 @@ static char* expand_macro(Macro* macro, const char* args, int* expanded_lines_co
     
     /* Expand macro body by substituting parameters */
     size_t body_len = strlen(macro->body);
+
+    /* SECURITY FIX: Check for overflow in size calculation */
+    if (body_len > (SIZE_MAX - 1024) / 2) {
+        return NULL;  /* Macro body too large */
+    }
+
     size_t result_size = body_len * 2 + 1024;  /* Extra space for expansion */
     char* result = (char*)malloc(result_size);
     result[0] = '\0';
@@ -1277,10 +1293,21 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             free(included);
             for (char* inc_line = strtok(inc_copy, "\n"); inc_line; inc_line = strtok(NULL, "\n")) {
                 if (nlines == cap) {
-                    cap *= 2;
-                    char** t = (char**)realloc(lines, sizeof(char*) * cap);
+                    /* SECURITY FIX: Check for overflow before doubling */
+                    int new_cap;
+                    if (cap > INT_MAX / 2) {
+                        new_cap = INT_MAX;  /* Maximum possible for int */
+                    } else {
+                        new_cap = cap * 2;
+                    }
+                    /* Also check that allocation size doesn't overflow */
+                    if ((size_t)new_cap > SIZE_MAX / sizeof(char*)) {
+                        free(inc_copy); free(lines); free(copy); return 0;
+                    }
+                    char** t = (char**)realloc(lines, sizeof(char*) * (size_t)new_cap);
                     if (!t) { free(inc_copy); free(lines); free(copy); return 0; }
                     lines = t;
+                    cap = new_cap;
                 }
                 lines[nlines++] = strdup(inc_line);
             }
@@ -1288,10 +1315,21 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         } else {
             /* Normal line */
             if (nlines == cap) {
-                cap *= 2;
-                char** t = (char**)realloc(lines, sizeof(char*) * cap);
+                /* SECURITY FIX: Check for overflow before doubling */
+                int new_cap;
+                if (cap > INT_MAX / 2) {
+                    new_cap = INT_MAX;  /* Maximum possible for int */
+                } else {
+                    new_cap = cap * 2;
+                }
+                /* Also check that allocation size doesn't overflow */
+                if ((size_t)new_cap > SIZE_MAX / sizeof(char*)) {
+                    free(lines); free(copy); return 0;
+                }
+                char** t = (char**)realloc(lines, sizeof(char*) * (size_t)new_cap);
                 if (!t) { free(lines); free(copy); return 0; }
                 lines = t;
+                cap = new_cap;
             }
             lines[nlines++] = strdup(s);
         }
@@ -1465,8 +1503,26 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 }
                 
                 size_t line_len = strlen(lines[i]);
+
+                /* SECURITY FIX: Check for integer overflow before addition */
+                if (line_len > SIZE_MAX - 2 || body_len > SIZE_MAX - line_len - 2) {
+                    free(body);
+                    report_error((const char**)lines, i+1, "macro body too large (integer overflow)");
+                    for (int k = 0; k < nlines; k++) free(lines[k]);
+                    free(lines); free(copy); return 0;
+                }
+
                 if (body_len + line_len + 2 > body_cap) {
-                    body_cap *= 2;
+                    /* SECURITY FIX: Check for overflow before doubling */
+                    if (body_cap > SIZE_MAX / 2) {
+                        body_cap = SIZE_MAX;  /* Cap at maximum */
+                    } else {
+                        body_cap *= 2;
+                    }
+                    /* Ensure body_cap is large enough */
+                    if (body_cap < body_len + line_len + 2) {
+                        body_cap = body_len + line_len + 2;
+                    }
                     char* new_body = (char*)realloc(body, body_cap);
                     if (!new_body) {
                         free(body);
@@ -2291,8 +2347,26 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 }
                 
                 size_t line_len = strlen(lines[i]);
+
+                /* SECURITY FIX: Check for integer overflow before addition */
+                if (line_len > SIZE_MAX - 2 || body_len > SIZE_MAX - line_len - 2) {
+                    free(body);
+                    report_error((const char**)lines, i+1, "macro body too large (integer overflow)");
+                    for (int k = 0; k < nlines; k++) free(lines[k]);
+                    free(lines); free(copy); return 0;
+                }
+
                 if (body_len + line_len + 2 > body_cap) {
-                    body_cap *= 2;
+                    /* SECURITY FIX: Check for overflow before doubling */
+                    if (body_cap > SIZE_MAX / 2) {
+                        body_cap = SIZE_MAX;  /* Cap at maximum */
+                    } else {
+                        body_cap *= 2;
+                    }
+                    /* Ensure body_cap is large enough */
+                    if (body_cap < body_len + line_len + 2) {
+                        body_cap = body_len + line_len + 2;
+                    }
                     char* new_body = (char*)realloc(body, body_cap);
                     if (!new_body) {
                         free(body);
