@@ -14,6 +14,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -1055,29 +1056,107 @@ static UNUSED_FN int eval_condition(const char* expr, Label* labels, int nl, uin
     return result != 0;
 } */
 
+/* SECURITY FIX: Validate include file path to prevent path traversal attacks */
+static int validate_include_path(const char* filename, char* err) {
+    if (!filename || !*filename) {
+        snprintf(err, 128, "empty filename not allowed");
+        return 0;
+    }
+
+    /* Reject absolute paths */
+    if (filename[0] == '/' || filename[0] == '\\') {
+        snprintf(err, 128, "absolute paths not allowed in .INCLUDE");
+        return 0;
+    }
+
+    /* Check for Windows drive letters (C:, D:, etc.) */
+    if (filename[1] == ':' && isalpha((unsigned char)filename[0])) {
+        snprintf(err, 128, "absolute paths not allowed in .INCLUDE");
+        return 0;
+    }
+
+    /* Reject path traversal sequences */
+    const char* p = filename;
+    while (*p) {
+        if (p[0] == '.' && p[1] == '.') {
+            /* Check if it's actually "../" or "..\\" */
+            if (p[2] == '/' || p[2] == '\\' || p[2] == '\0') {
+                snprintf(err, 128, "path traversal (..) not allowed in .INCLUDE");
+                return 0;
+            }
+        }
+        p++;
+    }
+
+    /* Reject paths with null bytes (path injection) */
+    size_t len = strlen(filename);
+    for (size_t i = 0; i < len; i++) {
+        if (filename[i] == '\0') {
+            snprintf(err, 128, "null bytes in path not allowed");
+            return 0;
+        }
+    }
+
+    /* Limit path length */
+    if (len > 255) {
+        snprintf(err, 128, "path too long (max 255 characters)");
+        return 0;
+    }
+
+    return 1;
+}
+
 /* Read and include file contents */
 static char* read_include_file(const char* filename, char* err) {
     FILE* f = fopen(filename, "r");
     if (!f) {
-        snprintf(err, 128, "cannot open include file '%s'", filename);
+        snprintf(err, 128, "cannot open include file '%.80s'", filename);
         return NULL;
     }
-    
+
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
-    
-    char* buf = (char*)malloc(len + 1);
-    if (!buf) {
+
+    /* SECURITY FIX: Validate file size to prevent buffer overflow and resource exhaustion */
+    #define MAX_INCLUDE_SIZE (2 * 1024 * 1024)  /* 2MB maximum for include files */
+    if (len < 0) {
         fclose(f);
-        snprintf(err, 128, "out of memory reading '%s'", filename);
+        snprintf(err, 128, "cannot determine size of '%.80s'", filename);
         return NULL;
     }
-    
-    size_t read = fread(buf, 1, len, f);
-    buf[read] = '\0';
+    if (len > MAX_INCLUDE_SIZE) {
+        fclose(f);
+        snprintf(err, 128, "include file '%.80s' too large (%ld bytes, max %d)",
+                 filename, len, MAX_INCLUDE_SIZE);
+        return NULL;
+    }
+
+    /* SECURITY FIX: Check for integer overflow before malloc */
+    if (len >= LONG_MAX - 1) {
+        fclose(f);
+        snprintf(err, 128, "file size would cause integer overflow");
+        return NULL;
+    }
+
+    char* buf = (char*)malloc((size_t)len + 1);
+    if (!buf) {
+        fclose(f);
+        snprintf(err, 128, "out of memory reading '%.80s'", filename);
+        return NULL;
+    }
+
+    size_t bytes_read = fread(buf, 1, (size_t)len, f);
+    if (bytes_read != (size_t)len) {
+        free(buf);
+        fclose(f);
+        snprintf(err, 128, "failed to read complete file '%.80s'", filename);
+        return NULL;
+    }
+
+    buf[len] = '\0';
     fclose(f);
-    
+
     return buf;
 }
 
@@ -1135,9 +1214,15 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 strncpy(filename, p, sizeof(filename)-1);
                 filename[sizeof(filename)-1] = '\0';
             }
-            
-            /* Read and include the file */
+
+            /* SECURITY FIX: Validate path before including file */
             char err[128];
+            if (!validate_include_path(filename, err)) {
+                fprintf(stderr, "Error: .INCLUDE security violation - %s\n", err);
+                free(lines); free(copy); return 0;
+            }
+
+            /* Read and include the file */
             char* included = read_include_file(filename, err);
             if (!included) {
                 fprintf(stderr, "Error: %s\n", err);
@@ -1602,20 +1687,20 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         if (strncasecmp(line, ".FILL", 5) == 0) {
             char* p = line + 5;
             trim(p);
-            
+
             char* comma = strchr(p, ',');
             if (!comma) {
                 report_error((const char**)lines, i+1, ".FILL requires count,value");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            
+
             *comma = '\0';
             char count_str[64];
             strncpy(count_str, p, sizeof(count_str)-1);
             count_str[sizeof(count_str)-1] = '\0';
             trim(count_str);
-            
+
             uint32_t count;
             char err[128];
             if (!eval_expr(count_str, &count, labels, label_count, i+1, err, pc, current_scope)) {
@@ -1623,7 +1708,19 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            
+
+            /* SECURITY FIX: Validate count doesn't cause address overflow */
+            if (count >= 0x10000) {
+                report_error((const char**)lines, i+1, ".FILL count too large (max 65535)");
+                for (int k = 0; k < nlines; k++) free(lines[k]);
+                free(lines); free(copy); return 0;
+            }
+            if (pc > 0xFFFF - count) {
+                report_error((const char**)lines, i+1, ".FILL would cause address overflow");
+                for (int k = 0; k < nlines; k++) free(lines[k]);
+                free(lines); free(copy); return 0;
+            }
+
             pc += (uint16_t)count;
             continue;
         }
@@ -1632,7 +1729,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         if (strncasecmp(line, ".DS", 3) == 0) {
             char* p = line + 3;
             trim(p);
-            
+
             uint32_t count;
             char err[128];
             if (!eval_expr(p, &count, labels, label_count, i+1, err, pc, current_scope)) {
@@ -1640,7 +1737,19 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            
+
+            /* SECURITY FIX: Validate count doesn't cause address overflow */
+            if (count >= 0x10000) {
+                report_error((const char**)lines, i+1, ".DS count too large (max 65535)");
+                for (int k = 0; k < nlines; k++) free(lines[k]);
+                free(lines); free(copy); return 0;
+            }
+            if (pc > 0xFFFF - count) {
+                report_error((const char**)lines, i+1, ".DS would cause address overflow");
+                for (int k = 0; k < nlines; k++) free(lines[k]);
+                free(lines); free(copy); return 0;
+            }
+
             pc += (uint16_t)count;
             continue;
         }
@@ -2404,8 +2513,16 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 free(lines); free(copy); return 0;
             }
 
-            if (count > 0x10000) {
-                report_error((const char**)lines, i+1, ".FILL count too large or negative");
+            /* SECURITY FIX: Off-by-one error fix and overflow check */
+            if (count >= 0x10000) {
+                report_error((const char**)lines, i+1, ".FILL count too large (max 65535)");
+                for (int k = 0; k < nlines; k++) free(lines[k]);
+                free(lines); free(copy); return 0;
+            }
+
+            /* SECURITY FIX: Check for address overflow before writing */
+            if (pc > 0xFFFF - count) {
+                report_error((const char**)lines, i+1, ".FILL would cause address overflow");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
@@ -2415,13 +2532,13 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            
+
             if (value > 0xFF) {
                 report_error((const char**)lines, i+1, ".FILL value must be 0-255");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            
+
             for (uint32_t j = 0; j < count; j++) {
                 w8_raw(vm, pc++, (uint8_t)value);
             }
@@ -2432,7 +2549,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         if (strncasecmp(line, ".DS", 3) == 0) {
             char* p = line + 3;
             trim(p);
-            
+
             uint32_t count;
             char err[128];
             if (!eval_expr(p, &count, labels, label_count, i+1, err, pc, current_scope)) {
@@ -2440,9 +2557,17 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            
-            if (count > 0x10000) {
-                report_error((const char**)lines, i+1, ".DS count too large or negative");
+
+            /* SECURITY FIX: Off-by-one error fix and overflow check */
+            if (count >= 0x10000) {
+                report_error((const char**)lines, i+1, ".DS count too large (max 65535)");
+                for (int k = 0; k < nlines; k++) free(lines[k]);
+                free(lines); free(copy); return 0;
+            }
+
+            /* SECURITY FIX: Check for address overflow before writing */
+            if (pc > 0xFFFF - count) {
+                report_error((const char**)lines, i+1, ".DS would cause address overflow");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
@@ -5159,19 +5284,35 @@ static void cpu_execute(VM* vm) {
                     }
 
                     case SYS_PRINT: {
+                        /* SECURITY FIX: Add bounds checking to prevent infinite loop and wraparound */
                         uint16_t addr = cpu->X | (cpu->Y << 8);
-                        while (mem[addr]) fputc((int)mem[addr++], stdout);
+                        uint16_t count = 0;
+                        const uint16_t MAX_PRINT = 4096;  /* Limit output to 4KB */
+
+                        while (mem[addr] && count < MAX_PRINT) {
+                            fputc((int)mem[addr], stdout);
+                            count++;
+                            /* SECURITY FIX: Prevent address wraparound */
+                            if (addr == 0xFFFF) break;
+                            addr++;
+                        }
                         fflush(stdout);
                         break;
                     }
 
                     case SYS_READLN: {
-                        
+                        /* SECURITY FIX: Validate buffer address and length */
                         uint16_t addr = cpu->X | (cpu->Y << 8);
-                        int maxlen = cpu->A;                        
+                        int maxlen = cpu->A;
+
+                        /* SECURITY FIX: Validate maxlen is reasonable */
+                        if (maxlen <= 0 || maxlen > 255) {
+                            maxlen = 255;
+                        }
+
                         char buffer[256];
                         char* result = fgets(buffer, maxlen + 1, stdin);
-                        
+
                         if (result) {
                             int len = 0;
                             while (buffer[len] && buffer[len] != '\n' && len < maxlen) {
@@ -5369,12 +5510,47 @@ static void cpu_execute(VM* vm) {
 static char* slurp_file(const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
+
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char* buf = (char*)malloc(len + 1);
-    if (!buf) { fclose(f); return NULL; }
-    if (fread(buf, 1, len, f) != (size_t)len) { free(buf); fclose(f); return NULL; }
+
+    /* SECURITY FIX: Validate file size to prevent buffer overflow and resource exhaustion */
+    #define MAX_FILE_SIZE (10 * 1024 * 1024)  /* 10MB maximum */
+    if (len < 0) {
+        fprintf(stderr, "Error: Cannot determine file size for '%s'\n", path);
+        fclose(f);
+        return NULL;
+    }
+    if (len > MAX_FILE_SIZE) {
+        fprintf(stderr, "Error: File '%s' too large (%ld bytes, max %d bytes)\n",
+                path, len, MAX_FILE_SIZE);
+        fclose(f);
+        return NULL;
+    }
+
+    /* SECURITY FIX: Check for integer overflow before malloc */
+    if (len >= LONG_MAX - 1) {
+        fprintf(stderr, "Error: File size would cause integer overflow\n");
+        fclose(f);
+        return NULL;
+    }
+
+    char* buf = (char*)malloc((size_t)len + 1);
+    if (!buf) {
+        fprintf(stderr, "Error: Out of memory reading file\n");
+        fclose(f);
+        return NULL;
+    }
+
+    size_t bytes_read = fread(buf, 1, (size_t)len, f);
+    if (bytes_read != (size_t)len) {
+        fprintf(stderr, "Error: Failed to read complete file\n");
+        free(buf);
+        fclose(f);
+        return NULL;
+    }
+
     buf[len] = '\0';
     fclose(f);
     return buf;
@@ -5472,16 +5648,34 @@ static int load_rom(VM* vm, const char* path) {
     
     uint16_t start = b0 | (b1 << 8);
     uint16_t length = b2 | (b3 << 8);
-    
+
     printf("Decoded: Start=$%04X, Length=%u ($%04X)\n", start, length, length);
-    printf("Will load to memory range: $%04X-$%04X\n", start, (uint16_t)(start + length - 1));
-    
-    /* Validate ROM region */
-    if (start < ROM_START || start + length > 0x10000) {
-        fprintf(stderr, "ROM must be in range $C000-$FFFF\n");
+
+    /* SECURITY FIX: Validate ROM region with proper overflow checking */
+    if (start < ROM_START) {
+        fprintf(stderr, "ROM start address must be >= $C000\n");
         fclose(f);
         return 0;
     }
+
+    /* SECURITY FIX: Check for integer overflow before addition */
+    if (length > 0x10000 - start) {
+        fprintf(stderr, "ROM length would exceed memory bounds (start=$%04X, length=%u)\n",
+                start, length);
+        fclose(f);
+        return 0;
+    }
+
+    /* SECURITY FIX: Validate actual file contains claimed data */
+    long expected_file_size = 4 + (long)length;  /* 4-byte header + data */
+    if (file_size < expected_file_size) {
+        fprintf(stderr, "ROM file too small: expected %ld bytes, got %ld bytes\n",
+                expected_file_size, file_size);
+        fclose(f);
+        return 0;
+    }
+
+    printf("Will load to memory range: $%04X-$%04X\n", start, (uint16_t)(start + length - 1));
     
     /* Read last 6 bytes of file to verify vectors are present */
     long data_start = ftell(f);
