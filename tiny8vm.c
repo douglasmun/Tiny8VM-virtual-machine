@@ -14,6 +14,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -494,12 +495,12 @@ static int eval_expr(const char* s, uint32_t* result, Label* labels, int nl,
                 if (strcmp(op, "-") == 0) { *result = lval - rval; return 1; }
                 if (strcmp(op, "*") == 0) { *result = lval * rval; return 1; }
                 if (strcmp(op, "/") == 0) {
-                    if (rval == 0) { snprintf(err, 128, "division by zero"); return 0; }
+                    if (rval == 0) { snprintf(err, 256, "division by zero"); return 0; }
                     *result = lval / rval; 
                     return 1;
                 }
                 if (strcmp(op, "%") == 0) {
-                    if (rval == 0) { snprintf(err, 128, "modulo by zero"); return 0; }
+                    if (rval == 0) { snprintf(err, 256, "modulo by zero"); return 0; }
                     *result = lval % rval;
                     return 1;
                 }
@@ -514,7 +515,7 @@ static int eval_expr(const char* s, uint32_t* result, Label* labels, int nl,
             if (*p == '0' || *p == '1') {
                 *result = (*result << 1) | (*p - '0');
             } else {
-                snprintf(err, 128, "invalid binary literal '%s'", parse);
+                snprintf(err, 256, "invalid binary literal '%s'", parse);
                 return 0;
             }
         }
@@ -556,24 +557,24 @@ static int eval_expr(const char* s, uint32_t* result, Label* labels, int nl,
         }
     }
 
-    snprintf(err, 128, "unknown symbol '%s'", parse);
+    snprintf(err, 256, "unknown symbol '%s'", parse);
     return 0;
 }
 
 
 static int parse_imm8_ex(const char* s, uint8_t* out, Label* labels, int nl, 
                          int line_num, char* err, uint16_t current_pc, const char* current_scope) {
-    if (!s || !*s) { snprintf(err, 128, "missing immediate"); return 0; }
+    if (!s || !*s) { snprintf(err, 256, "missing immediate"); return 0; }
     
     /* Handle character literals */
     if (s[0] == '\'') {
         if (!s[1] || !s[2] || s[2] != '\'') {
-            snprintf(err, 128, "bad character literal '%s'", s);
+            snprintf(err, 256, "bad character literal '%s'", s);
             return 0;
         }
         if (s[1] == '\\') {
             if (!s[2] || !s[3] || s[3] != '\'') {
-                snprintf(err, 128, "bad escape in character literal '%s'", s);
+                snprintf(err, 256, "bad escape in character literal '%s'", s);
                 return 0;
             }
             switch (s[2]) {
@@ -595,7 +596,7 @@ static int parse_imm8_ex(const char* s, uint8_t* out, Label* labels, int nl,
     if (!eval_expr(s, &val, labels, nl, line_num, err, current_pc, current_scope)) return 0;
     
     if (val > 0xFF) {
-        snprintf(err, 128, "immediate too large: %u", val);
+        snprintf(err, 256, "immediate too large: %u", val);
         return 0;
     }
     
@@ -605,13 +606,13 @@ static int parse_imm8_ex(const char* s, uint8_t* out, Label* labels, int nl,
 
 static int parse_imm16(const char* s, uint16_t* out, Label* labels, int nl, 
                        char* err, uint16_t current_pc, const char* current_scope) {
-    if (!s || !*s) { snprintf(err, 128, "missing address"); return 0; }
+    if (!s || !*s) { snprintf(err, 256, "missing address"); return 0; }
     
     uint32_t val;
     if (!eval_expr(s, &val, labels, nl, 0, err, current_pc, current_scope)) return 0;
     
     if (val > 0xFFFF) {
-        snprintf(err, 128, "address too large: %u", val);
+        snprintf(err, 256, "address too large: %u", val);
         return 0;
     }
     
@@ -622,25 +623,25 @@ static int parse_imm16(const char* s, uint16_t* out, Label* labels, int nl,
 static int is_indx_zp(const char* s, uint8_t* zp, char* err, Label* labels, int nl, uint16_t current_pc, const char* current_scope) {
     (void)current_pc;
     (void)current_scope;
-    if (!s) { snprintf(err,128,"operand missing"); return 0; }
+    if (!s) { snprintf(err, 256,"operand missing"); return 0; }
     char buf[128]; strncpy(buf, s, sizeof(buf)-1); buf[sizeof(buf)-1]='\0'; trim(buf);
     size_t n = strlen(buf);
-    if (n < 6) { snprintf(err,128,"bad ($zz,X) syntax"); return 0; }
-    if (buf[0] != '(') { snprintf(err,128,"expected '(' for indirect"); return 0; }
+    if (n < 6) { snprintf(err, 256,"bad ($zz,X) syntax"); return 0; }
+    if (buf[0] != '(') { snprintf(err, 256,"expected '(' for indirect"); return 0; }
     char* rp = strchr(buf, ')');
-    if (!rp) { snprintf(err,128,"missing ')'"); return 0; }
+    if (!rp) { snprintf(err, 256,"missing ')'"); return 0; }
     
     // Find comma before )
     char* comma = strchr(buf, ',');
-    if (!comma || comma > rp) { snprintf(err,128,"expected ',X' inside parens"); return 0; }
+    if (!comma || comma > rp) { snprintf(err, 256,"expected ',X' inside parens"); return 0; }
     
     // Check for ,X
     char* idx = comma + 1;
     while (isspace((unsigned char)*idx)) idx++;
-    if (*idx != 'X' && *idx != 'x') { snprintf(err,128,"expected X after comma"); return 0; }
+    if (*idx != 'X' && *idx != 'x') { snprintf(err, 256,"expected X after comma"); return 0; }
     idx++;
     while (isspace((unsigned char)*idx)) idx++;
-    if (idx != rp) { snprintf(err,128,"unexpected characters after X"); return 0; }
+    if (idx != rp) { snprintf(err, 256,"unexpected characters after X"); return 0; }
 
     char inner[96];
     size_t ilen = (size_t)(comma - (buf + 1));
@@ -651,12 +652,12 @@ static int is_indx_zp(const char* s, uint8_t* zp, char* err, Label* labels, int 
 
     uint32_t hv=0;
     if (parse_hex(inner, &hv)) {
-        if (hv>0xFF) { snprintf(err,128,"zero-page index too large $%X", hv); return 0; }
+        if (hv>0xFF) { snprintf(err, 256,"zero-page index too large $%X", hv); return 0; }
         *zp=(uint8_t)hv; return 1;
     }
     long dv=0;
     if (parse_decimal(inner, &dv)) {
-        if (dv<0 || dv>255) { snprintf(err,128,"zero-page index out of range %ld", dv); return 0; }
+        if (dv<0 || dv>255) { snprintf(err, 256,"zero-page index out of range %ld", dv); return 0; }
         *zp=(uint8_t)dv; return 1;
     }
     
@@ -664,14 +665,14 @@ static int is_indx_zp(const char* s, uint8_t* zp, char* err, Label* labels, int 
     for (int i = 0; i < nl; i++) {
         if (strcmp(labels[i].name, inner) == 0) {
             if (labels[i].addr > 0xFF) {
-                snprintf(err,128,"label '%s' not in zero-page (0x%04X)", inner, labels[i].addr);
+                snprintf(err, 256,"label '%s' not in zero-page (0x%04X)", inner, labels[i].addr);
                 return 0;
             }
             *zp = (uint8_t)labels[i].addr;
             return 1;
         }
     }
-    snprintf(err,128,"unknown zp label '%s'", inner);
+    snprintf(err, 256,"unknown zp label '%s'", inner);
     return 0;
 }
 
@@ -679,14 +680,14 @@ static int is_indx_zp(const char* s, uint8_t* zp, char* err, Label* labels, int 
 static int is_indzp_y(const char* s, uint8_t* zp, char* err, Label* labels, int nl, uint16_t current_pc, const char* current_scope) {
     (void)current_pc;     // Supress warning of unused parameter
     (void)current_scope;  // Supress warning of unused parameter
-    if (!s) { snprintf(err,128,"operand missing"); return 0; }
+    if (!s) { snprintf(err, 256,"operand missing"); return 0; }
     char buf[128]; strncpy(buf, s, sizeof(buf)-1); buf[sizeof(buf)-1]='\0'; trim(buf);
     size_t n = strlen(buf);
-    if (n < 6) { snprintf(err,128,"bad ($zz),Y syntax"); return 0; }
-    if (buf[0] != '(') { snprintf(err,128,"expected '(' for indirect"); return 0; }
+    if (n < 6) { snprintf(err, 256,"bad ($zz),Y syntax"); return 0; }
+    if (buf[0] != '(') { snprintf(err, 256,"expected '(' for indirect"); return 0; }
     char* rp = strchr(buf, ')');
-    if (!rp) { snprintf(err,128,"missing ')'"); return 0; }
-    if (rp[1] != ',' || (rp[2] != 'Y' && rp[2] != 'y')) { snprintf(err,128,"expected ',Y'"); return 0; }
+    if (!rp) { snprintf(err, 256,"missing ')'"); return 0; }
+    if (rp[1] != ',' || (rp[2] != 'Y' && rp[2] != 'y')) { snprintf(err, 256,"expected ',Y'"); return 0; }
 
     char inner[96];
     size_t ilen = (size_t)(rp - (buf + 1));
@@ -697,12 +698,12 @@ static int is_indzp_y(const char* s, uint8_t* zp, char* err, Label* labels, int 
 
     uint32_t hv=0;
     if (parse_hex(inner, &hv)) {
-        if (hv>0xFF) { snprintf(err,128,"zero-page index too large $%X", hv); return 0; }
+        if (hv>0xFF) { snprintf(err, 256,"zero-page index too large $%X", hv); return 0; }
         *zp=(uint8_t)hv; return 1;
     }
     long dv=0;
     if (parse_decimal(inner, &dv)) {
-        if (dv<0 || dv>255) { snprintf(err,128,"zero-page index out of range %ld", dv); return 0; }
+        if (dv<0 || dv>255) { snprintf(err, 256,"zero-page index out of range %ld", dv); return 0; }
         *zp=(uint8_t)dv; return 1;
     }
     
@@ -710,14 +711,14 @@ static int is_indzp_y(const char* s, uint8_t* zp, char* err, Label* labels, int 
     for (int i = 0; i < nl; i++) {
         if (strcmp(labels[i].name, inner) == 0) {
             if (labels[i].addr > 0xFF) {
-                snprintf(err,128,"label '%s' not in zero-page (0x%04X)", inner, labels[i].addr);
+                snprintf(err, 256,"label '%s' not in zero-page (0x%04X)", inner, labels[i].addr);
                 return 0;
             }
             *zp = (uint8_t)labels[i].addr;
             return 1;
         }
     }
-    snprintf(err,128,"unknown zp label '%s'", inner);
+    snprintf(err, 256,"unknown zp label '%s'", inner);
     return 0;
 }
 
@@ -732,7 +733,7 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
 
     if (!strcasecmp(sp->mnem, "JMP") || !strcasecmp(sp->mnem, "JSR")) {
         if (!sp->op_abs) {
-            snprintf(err, 128, "Instruction %s requires absolute addressing", sp->mnem);
+            snprintf(err, 256, "Instruction %s requires absolute addressing", sp->mnem);
             return OP_NONE;
         }
         return OP_ABS;
@@ -740,7 +741,7 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
 
     if (buf[0] == '#') {
         if (!sp->op_imm) { 
-            snprintf(err,128,"Instruction %s doesn't support immediate", sp->mnem); 
+            snprintf(err, 256,"Instruction %s doesn't support immediate", sp->mnem); 
             return OP_NONE; 
         }
         return OP_IMM;
@@ -752,7 +753,7 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
         char temp_err[128] = {0};
         if (is_indx_zp(buf, &dummy, temp_err, labels, nl, current_pc, current_scope)) {
             if (!sp->op_indx_zp) { 
-                snprintf(err,128,"Instruction %s doesn't support ($zz,X)", sp->mnem); 
+                snprintf(err, 256,"Instruction %s doesn't support ($zz,X)", sp->mnem); 
                 return OP_NONE; 
             }
             return OP_INDX_ZP;
@@ -765,7 +766,7 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
         char temp_err[128] = {0};
         if (is_indzp_y(buf, &dummy, temp_err, labels, nl, current_pc, current_scope)) {
             if (!sp->op_indzp_y) { 
-                snprintf(err,128,"Instruction %s doesn't support ($zz),Y", sp->mnem); 
+                snprintf(err, 256,"Instruction %s doesn't support ($zz),Y", sp->mnem); 
                 return OP_NONE; 
             }
             return OP_INDZP_Y;
@@ -787,13 +788,13 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
                 if (hv <= 0xFF) {
                     if (!sp->op_zp_x) { 
                         if (sp->op_abs_x) return OP_ABS_X;
-                        snprintf(err,128,"no ZP,X form for this instruction"); 
+                        snprintf(err, 256,"no ZP,X form for this instruction"); 
                         return OP_NONE; 
                     }
                     return OP_ZP_X;
                 } else {
                     if (!sp->op_abs_x) { 
-                        snprintf(err,128,"no ABS,X form for this instruction"); 
+                        snprintf(err, 256,"no ABS,X form for this instruction"); 
                         return OP_NONE; 
                     }
                     return OP_ABS_X;
@@ -806,13 +807,13 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
                     if (labels[i].addr <= 0x00FFu) {
                         if (!sp->op_zp_x) { 
                             if (sp->op_abs_x) return OP_ABS_X;
-                            snprintf(err,128,"no ZP,X form for this instruction"); 
+                            snprintf(err, 256,"no ZP,X form for this instruction"); 
                             return OP_NONE; 
                         }
                         return OP_ZP_X;
                     } else {
                         if (!sp->op_abs_x) { 
-                            snprintf(err,128,"no ABS,X form for this instruction"); 
+                            snprintf(err, 256,"no ABS,X form for this instruction"); 
                             return OP_NONE; 
                         }
                         return OP_ABS_X;
@@ -822,7 +823,7 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
             
             if (sp->op_abs_x) return OP_ABS_X;
             if (sp->op_zp_x)  return OP_ZP_X;
-            snprintf(err,128,"unknown symbol '%s' for ,X", base);
+            snprintf(err, 256,"unknown symbol '%s' for ,X", base);
             return OP_NONE;
             
         } else if (strcmp(reg, "Y") == 0) {
@@ -831,13 +832,13 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
                 if (hv <= 0xFF) {
                     if (!sp->op_zp_y) { 
                         if (sp->op_abs_y) return OP_ABS_Y;
-                        snprintf(err,128,"no ZP,Y form for this instruction"); 
+                        snprintf(err, 256,"no ZP,Y form for this instruction"); 
                         return OP_NONE; 
                     }
                     return OP_ZP_Y;
                 } else {
                     if (!sp->op_abs_y) { 
-                        snprintf(err,128,"no ABS,Y form for this instruction"); 
+                        snprintf(err, 256,"no ABS,Y form for this instruction"); 
                         return OP_NONE; 
                     }
                     return OP_ABS_Y;
@@ -850,13 +851,13 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
                     if (labels[i].addr <= 0x00FFu) {
                         if (!sp->op_zp_y) { 
                             if (sp->op_abs_y) return OP_ABS_Y;
-                            snprintf(err,128,"no ZP,Y form for this instruction"); 
+                            snprintf(err, 256,"no ZP,Y form for this instruction"); 
                             return OP_NONE; 
                         }
                         return OP_ZP_Y;
                     } else {
                         if (!sp->op_abs_y) { 
-                            snprintf(err,128,"no ABS,Y form for this instruction"); 
+                            snprintf(err, 256,"no ABS,Y form for this instruction"); 
                             return OP_NONE; 
                         }
                         return OP_ABS_Y;
@@ -866,11 +867,11 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
             
             if (sp->op_abs_y) return OP_ABS_Y;
             if (sp->op_zp_y)  return OP_ZP_Y;
-            snprintf(err,128,"unknown symbol '%s' for ,Y", base);
+            snprintf(err, 256,"unknown symbol '%s' for ,Y", base);
             return OP_NONE;
             
         } else {
-            snprintf(err,128,"unknown index register '%s'", reg);
+            snprintf(err, 256,"unknown index register '%s'", reg);
             return OP_NONE;
         }
     }
@@ -881,13 +882,13 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
         if (hv <= 0xFF) {
             if (!sp->op_zp) { 
                 if (sp->op_abs) return OP_ABS;
-                snprintf(err,128,"no ZP form for this instruction"); 
+                snprintf(err, 256,"no ZP form for this instruction"); 
                 return OP_NONE; 
             }
             return OP_ZP;
         } else {
             if (!sp->op_abs) { 
-                snprintf(err,128,"no ABS form for this instruction"); 
+                snprintf(err, 256,"no ABS form for this instruction"); 
                 return OP_NONE; 
             }
             return OP_ABS;
@@ -901,13 +902,13 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
                 if (labels[i].addr <= 0x00FFu) {
                     if (!sp->op_zp) { 
                         if (sp->op_abs) return OP_ABS;
-                        snprintf(err,128,"no ZP form for this instruction"); 
+                        snprintf(err, 256,"no ZP form for this instruction"); 
                         return OP_NONE; 
                     }
                     return OP_ZP;
                 } else {
                     if (!sp->op_abs) { 
-                        snprintf(err,128,"no ABS form for this instruction"); 
+                        snprintf(err, 256,"no ABS form for this instruction"); 
                         return OP_NONE; 
                     }
                     return OP_ABS;
@@ -917,7 +918,7 @@ static Mode detect_mode(const Spec* sp, const char* operand, char* err, Label* l
     }
 
     if (sp->op_abs) return OP_ABS;
-    snprintf(err,128,"unknown symbol '%s'", buf);
+    snprintf(err, 256,"unknown symbol '%s'", buf);
     return OP_NONE;
 }
 
@@ -949,8 +950,8 @@ static void add_label(Label* labels, int* nl, const char* name, uint16_t addr, c
     
     /* Add new label */
     if (*nl < 1024) {
-        strncpy(labels[*nl].name, full_name, sizeof(labels[*nl].name)-1);
-        labels[*nl].name[sizeof(labels[*nl].name)-1]='\0';
+        /* Intentionally truncate long names to fit 64-byte buffer */
+        snprintf(labels[*nl].name, sizeof(labels[*nl].name), "%.63s", full_name);
         labels[*nl].addr = addr;
         labels[*nl].is_local = is_local;
         if (current_scope) {
@@ -1087,7 +1088,7 @@ static char* expand_macro(Macro* macro, const char* args, int* expanded_lines_co
 /* // Helper to evaluate conditional expressions
 static UNUSED_FN int eval_condition(const char* expr, Label* labels, int nl, uint16_t pc, const char* scope) {
     uint32_t result;
-    char err[128];
+    char err[256];
     if (!eval_expr(expr, &result, labels, nl, 0, err, pc, scope)) {
         return 0;  // Treat undefined as false
     }
@@ -1097,19 +1098,19 @@ static UNUSED_FN int eval_condition(const char* expr, Label* labels, int nl, uin
 /* SECURITY FIX: Validate include file path to prevent path traversal attacks */
 static int validate_include_path(const char* filename, char* err) {
     if (!filename || !*filename) {
-        snprintf(err, 128, "empty filename not allowed");
+        snprintf(err, 256, "empty filename not allowed");
         return 0;
     }
 
     /* Reject absolute paths */
     if (filename[0] == '/' || filename[0] == '\\') {
-        snprintf(err, 128, "absolute paths not allowed in .INCLUDE");
+        snprintf(err, 256, "absolute paths not allowed in .INCLUDE");
         return 0;
     }
 
     /* Check for Windows drive letters (C:, D:, etc.) */
     if (filename[1] == ':' && isalpha((unsigned char)filename[0])) {
-        snprintf(err, 128, "absolute paths not allowed in .INCLUDE");
+        snprintf(err, 256, "absolute paths not allowed in .INCLUDE");
         return 0;
     }
 
@@ -1119,7 +1120,7 @@ static int validate_include_path(const char* filename, char* err) {
         if (p[0] == '.' && p[1] == '.') {
             /* Check if it's actually "../" or "..\\" */
             if (p[2] == '/' || p[2] == '\\' || p[2] == '\0') {
-                snprintf(err, 128, "path traversal (..) not allowed in .INCLUDE");
+                snprintf(err, 256, "path traversal (..) not allowed in .INCLUDE");
                 return 0;
             }
         }
@@ -1130,14 +1131,14 @@ static int validate_include_path(const char* filename, char* err) {
     size_t len = strlen(filename);
     for (size_t i = 0; i < len; i++) {
         if (filename[i] == '\0') {
-            snprintf(err, 128, "null bytes in path not allowed");
+            snprintf(err, 256, "null bytes in path not allowed");
             return 0;
         }
     }
 
     /* Limit path length */
     if (len > 255) {
-        snprintf(err, 128, "path too long (max 255 characters)");
+        snprintf(err, 256, "path too long (max 255 characters)");
         return 0;
     }
 
@@ -1148,7 +1149,7 @@ static int validate_include_path(const char* filename, char* err) {
 static char* read_include_file(const char* filename, char* err) {
     FILE* f = fopen(filename, "r");
     if (!f) {
-        snprintf(err, 128, "cannot open include file '%.80s'", filename);
+        snprintf(err, 256, "cannot open include file '%.80s'", filename);
         return NULL;
     }
 
@@ -1160,12 +1161,12 @@ static char* read_include_file(const char* filename, char* err) {
     #define MAX_INCLUDE_SIZE (2 * 1024 * 1024)  /* 2MB maximum for include files */
     if (len < 0) {
         fclose(f);
-        snprintf(err, 128, "cannot determine size of '%.80s'", filename);
+        snprintf(err, 256, "cannot determine size of '%.80s'", filename);
         return NULL;
     }
     if (len > MAX_INCLUDE_SIZE) {
         fclose(f);
-        snprintf(err, 128, "include file '%.80s' too large (%ld bytes, max %d)",
+        snprintf(err, 256, "include file '%.80s' too large (%ld bytes, max %d)",
                  filename, len, MAX_INCLUDE_SIZE);
         return NULL;
     }
@@ -1173,14 +1174,14 @@ static char* read_include_file(const char* filename, char* err) {
     /* SECURITY FIX: Check for integer overflow before malloc */
     if (len >= LONG_MAX - 1) {
         fclose(f);
-        snprintf(err, 128, "file size would cause integer overflow");
+        snprintf(err, 256, "file size would cause integer overflow");
         return NULL;
     }
 
     char* buf = (char*)malloc((size_t)len + 1);
     if (!buf) {
         fclose(f);
-        snprintf(err, 128, "out of memory reading '%.80s'", filename);
+        snprintf(err, 256, "out of memory reading '%.80s'", filename);
         return NULL;
     }
 
@@ -1188,7 +1189,7 @@ static char* read_include_file(const char* filename, char* err) {
     if (bytes_read != (size_t)len) {
         free(buf);
         fclose(f);
-        snprintf(err, 128, "failed to read complete file '%.80s'", filename);
+        snprintf(err, 256, "failed to read complete file '%.80s'", filename);
         return NULL;
     }
 
@@ -1258,7 +1259,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             }
 
             /* SECURITY FIX: Validate path before including file */
-            char err[128];
+            char err[256];
             if (!validate_include_path(filename, err)) {
                 fprintf(stderr, "Error: .INCLUDE security violation - %s\n", err);
                 free(lines); free(copy); return 0;
@@ -1393,7 +1394,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 trim(value_str);
                 
                 uint32_t val;
-                char err[128];
+                char err[256];
                 if (eval_expr(value_str, &val, labels, label_count, i+1, err, pc, current_scope)) {
                     add_label(labels, &label_count, name_part, (uint16_t)val, current_scope);
                 } else {
@@ -1424,8 +1425,8 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             }
             
             strtoupper(macro_name);
-            strncpy(macros[macro_count].name, macro_name, sizeof(macros[macro_count].name)-1);
-            macros[macro_count].name[sizeof(macros[macro_count].name)-1] = '\0';
+            /* Intentionally truncate long names to fit 64-byte buffer */
+            snprintf(macros[macro_count].name, sizeof(macros[macro_count].name), "%.63s", macro_name);
             
             /* Parse parameters */
             p = strchr(p, ' ');
@@ -1454,9 +1455,9 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 char check[512];
                 strncpy(check, lines[i], sizeof(check)-1);
                 check[sizeof(check)-1] = '\0';
-                
-                char* semi = strchr(check, ';');
-                if (semi) *semi = '\0';
+
+                char* comment = strchr(check, ';');
+                if (comment) *comment = '\0';
                 trim(check);
                 
                 if (strncasecmp(check, ".ENDMACRO", 9) == 0) {
@@ -1516,7 +1517,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             
             if (parent_active) {
                 uint32_t val;
-                char err[128];
+                char err[256];
                 int eval_success = eval_expr(expr, &val, labels, label_count, i+1, err, pc, current_scope);
                 
                 if (eval_success) {
@@ -1707,7 +1708,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             char name[64], value_str[128];
             if (sscanf(line + 4, "%63s %127s", name, value_str) == 2) {
                 uint32_t val;
-                char err[128];
+                char err[256];
                 if (eval_expr(value_str, &val, labels, label_count, i+1, err, pc, current_scope)) {
                     add_label(labels, &label_count, name, (uint16_t)val, current_scope);
                 } else {
@@ -1753,7 +1754,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             trim(count_str);
 
             uint32_t count;
-            char err[128];
+            char err[256];
             if (!eval_expr(count_str, &count, labels, label_count, i+1, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -1783,7 +1784,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             trim(p);
 
             uint32_t count;
-            char err[128];
+            char err[256];
             if (!eval_expr(p, &count, labels, label_count, i+1, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -1894,7 +1895,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             trim(p);
             
             uint32_t boundary;
-            char err[128];
+            char err[256];
             if (!eval_expr(p, &boundary, labels, label_count, i+1, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2019,7 +2020,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             free(lines); free(copy); return 0;
         }
 
-        char err[128] = {0};
+        char err[256] = {0};
         Mode m = detect_mode(sp, operand, err, labels, label_count, pc, current_scope);
         
         if (m == OP_NONE && err[0]) {
@@ -2136,7 +2137,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 trim(value_str);
                 
                 uint32_t val;
-                char err[128];
+                char err[256];
                 if (eval_expr(value_str, &val, labels, label_count, i+1, err, pc, current_scope)) {
                     add_label(labels, &label_count, name_part, (uint16_t)val, current_scope);
                 } else {
@@ -2201,7 +2202,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             strcpy(end_str, comma2 + 1);
             trim(end_str);
             
-            char err[128];
+            char err[256];
             if (!parse_imm16(start_str, &start_addr, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2214,8 +2215,8 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 free(lines); free(copy); return 0;
             }
             
-            // Validate addresses
-            if (start_addr < ROM_START || end_addr > 0xFFFF || start_addr > end_addr) {
+            // Validate addresses (end_addr is uint16_t so always <= 0xFFFF)
+            if (start_addr < ROM_START || start_addr > end_addr) {
                 report_error((const char**)lines, i+1, ".SAVEROM addresses must be in ROM range $C000-$FFFF");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
@@ -2252,8 +2253,8 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             }
             
             strtoupper(macro_name);
-            strncpy(macros[macro_count].name, macro_name, sizeof(macros[macro_count].name)-1);
-            macros[macro_count].name[sizeof(macros[macro_count].name)-1] = '\0';
+            /* Intentionally truncate long names to fit 64-byte buffer */
+            snprintf(macros[macro_count].name, sizeof(macros[macro_count].name), "%.63s", macro_name);
             
             p = strchr(p, ' ');
             macros[macro_count].param_count = 0;
@@ -2280,9 +2281,9 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 char check[512];
                 strncpy(check, lines[i], sizeof(check)-1);
                 check[sizeof(check)-1] = '\0';
-                
-                char* semi = strchr(check, ';');
-                if (semi) *semi = '\0';
+
+                char* comment = strchr(check, ';');
+                if (comment) *comment = '\0';
                 trim(check);
                 
                 if (strncasecmp(check, ".ENDMACRO", 9) == 0) {
@@ -2342,7 +2343,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             
             if (parent_active) {
                 uint32_t val;
-                char err[128];
+                char err[256];
                 int eval_success = eval_expr(expr, &val, labels, label_count, i+1, err, pc, current_scope);
                 
                 if (eval_success) {
@@ -2568,7 +2569,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             trim(value_str);
 
             uint32_t count, value;
-            char err[128];
+            char err[256];
             if (!eval_expr(count_str, &count, labels, label_count, i+1, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2614,7 +2615,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             trim(p);
 
             uint32_t count;
-            char err[128];
+            char err[256];
             if (!eval_expr(p, &count, labels, label_count, i+1, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2669,7 +2670,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 trim(expr);
                 
                 uint16_t word_val;
-                char err[128];
+                char err[256];
                 if (!parse_imm16(expr, &word_val, labels, label_count, err, pc, current_scope)) {
                     report_error((const char**)lines, i+1, err);
                     for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2744,7 +2745,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                     char save = *end; *end = '\0';
                     
                     uint8_t bval;
-                    char err[128];
+                    char err[256];
                     if (!parse_imm8_ex(p, &bval, labels, label_count, i+1, err, pc, current_scope)) {
                         report_error((const char**)lines, i+1, err);
                         for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2767,7 +2768,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             trim(p);
             
             uint32_t boundary;
-            char err[128];
+            char err[256];
             if (!eval_expr(p, &boundary, labels, label_count, i+1, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2832,7 +2833,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
         /* Pseudo-instructions */
         if (!strcasecmp(mnem,"JZ")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2851,7 +2852,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"JNZ")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2882,7 +2883,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             addr_str[len] = '\0';
             
             uint16_t addr = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(addr_str, &addr, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2897,7 +2898,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BCC")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2916,7 +2917,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BCS")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2935,7 +2936,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BEQ")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2954,7 +2955,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BNE")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2973,7 +2974,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BPL")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -2992,7 +2993,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BMI")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -3011,7 +3012,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BVC")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -3030,7 +3031,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
 
         if (!strcasecmp(mnem,"BVS")) {
             uint16_t target = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             if (!parse_imm16(operand, &target, labels, label_count, err, pc, current_scope)) {
                 report_error((const char**)lines, i+1, err);
                 for (int k = 0; k < nlines; k++) free(lines[k]);
@@ -3068,7 +3069,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 free(lines); free(copy); return 0;
             }
             uint8_t num = 0;
-            char err[128] = {0};
+            char err[256] = {0};
             
             const char* parse_str = operand;
             if (operand[0] == '#') {
@@ -3140,7 +3141,7 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             free(lines); free(copy); return 0;
         }
 
-        char err[128] = {0};
+        char err[256] = {0};
         Mode m = detect_mode(sp, operand, err, labels, label_count, pc, current_scope);
         
         if (m == OP_NONE && err[0]) { 
@@ -3370,8 +3371,8 @@ static void cpu_execute(VM* vm) {
 
         /* SECURITY FIX: Prevent infinite loops and DoS attacks */
         if (cpu->cycles > max_cycles) {
-            fprintf(stderr, "\n*** SECURITY: Execution timeout (%llu cycles) ***\n",
-                    (unsigned long long)MAX_EXECUTION_CYCLES);
+            fprintf(stderr, "\n*** SECURITY: Execution timeout (%" PRIu64 " cycles) ***\n",
+                    (uint64_t)MAX_EXECUTION_CYCLES);
             fprintf(stderr, "Program exceeded maximum execution time.\n");
             fprintf(stderr, "This may indicate an infinite loop or malicious code.\n");
             fprintf(stderr, "PC=$%04X A=$%02X X=$%02X Y=$%02X P=$%02X SP=$%02X\n",
@@ -3379,12 +3380,8 @@ static void cpu_execute(VM* vm) {
             return;
         }
         
-        /* Validate PC is in valid range */
-        if (cpu->PC > 0xFFFF) {
-            fprintf(stderr, "\nPC out of range: $%04X\n", (unsigned)cpu->PC);
-            return;
-        }
-                cpu->cycles++;
+        /* PC is uint16_t, so always in valid range 0x0000-0xFFFF */
+        cpu->cycles++;
 
         /* Check for NMI first (non-maskable, higher priority BEFORE fetching instruction) */
         if (vm->nmi_pending) {
@@ -5907,7 +5904,7 @@ static int load_and_run(VM* vm, const char* asm_src, int trace, int disasm_only,
 
     if (stats) {
         printf("\n=== Statistics ===\n");
-        printf("Cycles: %llu\n", vm->cpu.cycles);
+        printf("Cycles: %" PRIu64 "\n", vm->cpu.cycles);
     }
 
     return 0;
@@ -6064,8 +6061,8 @@ int main(int argc, char* argv[]) {
             end = (uint16_t)strtoul(argv[5], NULL, 0);
         }
                 
-        // Validate ROM region
-        if (start < ROM_START || end > 0xFFFF || start > end) {
+        // Validate ROM region (end is uint16_t so always <= 0xFFFF)
+        if (start < ROM_START || start > end) {
             fprintf(stderr, "Error: ROM addresses must be in range $C000-$FFFF\n");
             free(src);
             return 1;
@@ -6161,7 +6158,7 @@ int main(int argc, char* argv[]) {
         
         if (stats) {
             printf("\n=== Statistics ===\n");
-            printf("Cycles: %llu\n", vm.cpu.cycles);
+            printf("Cycles: %" PRIu64 "\n", vm.cpu.cycles);
         }
         
         return 0;
