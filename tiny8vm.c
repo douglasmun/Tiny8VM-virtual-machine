@@ -292,7 +292,9 @@ static int parse_decimal(const char* s, long* out) {
     char* end = NULL;
     errno = 0;
     long v = strtol(s, &end, 10);
+    /* SECURITY FIX: Validate range to prevent sign extension issues */
     if (errno != 0 || end == s || *end != '\0') return 0;
+    if (v < 0 || v > 0xFFFF) return 0;  /* Must fit in 16 bits unsigned */
     *out = v;
     return 1;
 }
@@ -5485,25 +5487,18 @@ static void cpu_execute(VM* vm) {
                 }
                                 
                 /* Valid BRK vector found - execute as software interrupt */
-                
+
                 /* Increment PC by 2 (BRK is 2-byte instruction with signature byte) */
                 cpu->PC += 2;
-                
-                /* Push PC high byte */
-                mem[0x100 | cpu->SP] = (uint8_t)(cpu->PC >> 8);
-                cpu->SP--;
-                
-                /* Push PC low byte */
-                mem[0x100 | cpu->SP] = (uint8_t)cpu->PC;
-                cpu->SP--;
-                
-                /* Push processor status with B flag SET */
-                mem[0x100 | cpu->SP] = cpu->P | FLAG_B;
-                cpu->SP--;
-                
+
+                /* SECURITY FIX: Use safe stack operations */
+                if (!stack_push(vm, (uint8_t)(cpu->PC >> 8))) return;  /* Push PC high byte */
+                if (!stack_push(vm, (uint8_t)cpu->PC)) return;         /* Push PC low byte */
+                if (!stack_push(vm, cpu->P | FLAG_B)) return;          /* Push status with B flag SET */
+
                 /* Set interrupt disable flag */
                 cpu->P |= FLAG_I;
-                
+
                 /* Jump to BRK/IRQ vector */
                 cpu->PC = brk_vec;
                 
