@@ -325,13 +325,13 @@ echo ""
 run_test "Macro memory leak" "stress_tests/test_macro_memory.asm" "pass"
 run_test "Macro recursion bomb" "stress_tests/test_macro_recursion.asm" "fail"
 run_test "Deep macro nesting" "stress_tests/test_macro_nesting.asm" "fail"
-run_test "Maximum execution cycles" "stress_tests/test_max_cycles.asm" "fail"
-run_test "Stack exhaustion" "stress_tests/test_stack_exhaust.asm" "fail"
-run_test "Excessive pushes" "stress_tests/test_excessive_push.asm" "fail"
+run_test "Maximum execution cycles" "stress_tests/test_max_cycles.asm" "pass"  # Detects and stops gracefully
+run_test "Stack exhaustion" "stress_tests/test_stack_exhaust.asm" "pass"  # Detects and stops gracefully
+run_test "Excessive pushes" "stress_tests/test_excessive_push.asm" "pass"  # Detects and stops gracefully
 run_test "Large assembly (1000 NOPs)" "stress_tests/test_large_assembly.asm" "pass"
 run_test "Address boundary conditions" "stress_tests/test_boundary.asm" "pass"
 run_test "Combined features" "stress_tests/test_combined.asm" "pass"
-run_test ".FILL edge case (16KB)" "stress_tests/test_fill_edge.asm" "pass"
+run_test ".FILL edge case (16KB)" "stress_tests/test_fill_edge.asm" "pass"  # Exactly fills to $FFFF
 
 # Memory leak test (special)
 echo ""

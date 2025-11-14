@@ -1766,7 +1766,8 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            if (pc > 0xFFFF - count) {
+            /* Check overflow: bytes written at pc..pc+count-1, so last byte at pc+count-1 must be <= 0xFFFF */
+            if (pc > 0x10000 - count) {
                 report_error((const char**)lines, i+1, ".FILL would cause address overflow");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
@@ -1795,7 +1796,8 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
             }
-            if (pc > 0xFFFF - count) {
+            /* Check overflow: bytes written at pc..pc+count-1, so last byte at pc+count-1 must be <= 0xFFFF */
+            if (pc > 0x10000 - count) {
                 report_error((const char**)lines, i+1, ".DS would cause address overflow");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
@@ -2581,7 +2583,8 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             }
 
             /* SECURITY FIX: Check for address overflow before writing */
-            if (pc > 0xFFFF - count) {
+            /* Check overflow: bytes written at pc..pc+count-1, so last byte at pc+count-1 must be <= 0xFFFF */
+            if (pc > 0x10000 - count) {
                 report_error((const char**)lines, i+1, ".FILL would cause address overflow");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;
@@ -2626,7 +2629,8 @@ static int assemble(VM* vm, const char* src, uint16_t default_org) {
             }
 
             /* SECURITY FIX: Check for address overflow before writing */
-            if (pc > 0xFFFF - count) {
+            /* Check overflow: bytes written at pc..pc+count-1, so last byte at pc+count-1 must be <= 0xFFFF */
+            if (pc > 0x10000 - count) {
                 report_error((const char**)lines, i+1, ".DS would cause address overflow");
                 for (int k = 0; k < nlines; k++) free(lines[k]);
                 free(lines); free(copy); return 0;

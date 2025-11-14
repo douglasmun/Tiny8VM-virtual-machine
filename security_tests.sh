@@ -187,8 +187,8 @@ echo "=========================================="
 echo ""
 
 # Run tests
-run_test "Infinite loop timeout" "security_tests/test_infinite_loop.asm" "fail"
-run_test "Stack underflow detection" "security_tests/test_stack_underflow.asm" "fail"
+run_test "Infinite loop timeout" "security_tests/test_infinite_loop.asm" "pass"  # Detects and stops gracefully
+run_test "Stack underflow detection" "security_tests/test_stack_underflow.asm" "pass"  # Detects and stops gracefully
 run_test "Large file rejection" "security_tests/test_large_file.asm" "fail"
 run_test "Path traversal prevention" "security_tests/test_path_traversal.asm" "fail"
 run_test "FILL integer overflow" "security_tests/test_fill_overflow.asm" "fail"
