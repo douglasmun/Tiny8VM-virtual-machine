@@ -61,6 +61,11 @@ static int strncasecmp(const char* a, const char* b, size_t n) {
 #define IO_END   0xBFFFu
 #define ROM_START 0xC000u
 
+/* SECURITY: Resource limits to prevent DoS attacks */
+#define MAX_EXECUTION_CYCLES 100000000ULL  /* 100 million cycles max */
+#define MAX_MACRO_DEPTH 100                /* Maximum macro nesting depth */
+#define MIN_STACK_POINTER 0x10             /* Stack overflow threshold */
+
 typedef struct {
     uint8_t A, X, Y, SP, P;
     uint16_t PC;
@@ -250,6 +255,37 @@ static int parse_hex(const char* s, uint32_t* out) {
 
 static void strtoupper(char* s) {
     for (; *s; ++s) *s = (char)toupper((unsigned char)*s);
+}
+
+/* SECURITY FIX: Safe stack operations with overflow/underflow detection */
+static inline int stack_push(VM* vm, uint8_t value) {
+    CPU* cpu = &vm->cpu;
+    /* Check for stack underflow (wrapping below page 1) */
+    if (cpu->SP < MIN_STACK_POINTER) {
+        fprintf(stderr, "\n*** SECURITY: Stack underflow detected ***\n");
+        fprintf(stderr, "SP=$%02X (minimum=$%02X)\n", cpu->SP, MIN_STACK_POINTER);
+        fprintf(stderr, "PC=$%04X A=$%02X X=$%02X Y=$%02X\n",
+                cpu->PC, cpu->A, cpu->X, cpu->Y);
+        return 0;  /* Failure */
+    }
+    vm->mem[0x100 | cpu->SP] = value;
+    cpu->SP--;
+    return 1;  /* Success */
+}
+
+static inline int stack_pop(VM* vm, uint8_t* value) {
+    CPU* cpu = &vm->cpu;
+    /* Check for stack overflow (wrapping above page 1) */
+    if (cpu->SP >= 0xFF) {
+        fprintf(stderr, "\n*** SECURITY: Stack overflow detected ***\n");
+        fprintf(stderr, "SP=$%02X\n", cpu->SP);
+        fprintf(stderr, "PC=$%04X A=$%02X X=$%02X Y=$%02X\n",
+                cpu->PC, cpu->A, cpu->X, cpu->Y);
+        return 0;  /* Failure */
+    }
+    cpu->SP++;
+    *value = vm->mem[0x100 | cpu->SP];
+    return 1;  /* Success */
 }
 
 static int parse_decimal(const char* s, long* out) {
@@ -3289,15 +3325,19 @@ static int validate_vm_state(VM* vm) {
 static void cpu_execute(VM* vm) {
     CPU* cpu = &vm->cpu;
     uint8_t* mem = vm->mem;
-    
-    /* Safety: Detect runaway execution */
-    uint64_t max_cycles = cpu->cycles + 100000000;  // 100M cycle limit
+
+    /* SECURITY FIX: Use global constant for execution limit */
+    uint64_t start_cycles = cpu->cycles;
+    uint64_t max_cycles = start_cycles + MAX_EXECUTION_CYCLES;
 
     while (1) {
 
-        /* Safety check: prevent infinite loops */
+        /* SECURITY FIX: Prevent infinite loops and DoS attacks */
         if (cpu->cycles > max_cycles) {
-            fprintf(stderr, "\nExecution timeout (100M cycles)\n");
+            fprintf(stderr, "\n*** SECURITY: Execution timeout (%llu cycles) ***\n",
+                    (unsigned long long)MAX_EXECUTION_CYCLES);
+            fprintf(stderr, "Program exceeded maximum execution time.\n");
+            fprintf(stderr, "This may indicate an infinite loop or malicious code.\n");
             fprintf(stderr, "PC=$%04X A=$%02X X=$%02X Y=$%02X P=$%02X SP=$%02X\n",
                     cpu->PC, cpu->A, cpu->X, cpu->Y, cpu->P, cpu->SP);
             return;
@@ -3314,16 +3354,11 @@ static void cpu_execute(VM* vm) {
         if (vm->nmi_pending) {
 
             vm->nmi_pending = 0;
-            
-            /* Push PC high byte */
-            mem[0x100 | cpu->SP] = (uint8_t)(cpu->PC >> 8);
-            cpu->SP--;
-            /* Push PC low byte */
-            mem[0x100 | cpu->SP] = (uint8_t)cpu->PC;
-            cpu->SP--;
-            /* Push processor status (B flag clear for NMI) */
-            mem[0x100 | cpu->SP] = cpu->P & ~FLAG_B;
-            cpu->SP--;
+
+            /* SECURITY FIX: Use safe stack operations */
+            if (!stack_push(vm, (uint8_t)(cpu->PC >> 8))) return;  /* Push PC high byte */
+            if (!stack_push(vm, (uint8_t)cpu->PC)) return;         /* Push PC low byte */
+            if (!stack_push(vm, cpu->P & ~FLAG_B)) return;         /* Push status (B clear for NMI) */
             
             /* Set interrupt disable flag (NMI does this too) */
             cpu->P |= FLAG_I;
@@ -3338,16 +3373,11 @@ static void cpu_execute(VM* vm) {
         /* Check for IRQ (maskable, lower priority) */
         if (vm->irq_pending && !(cpu->P & FLAG_I)) {
             vm->irq_pending = 0;
-            
-            /* Push PC high byte */
-            mem[0x100 | cpu->SP] = (uint8_t)(cpu->PC >> 8);
-            cpu->SP--;
-            /* Push PC low byte */
-            mem[0x100 | cpu->SP] = (uint8_t)cpu->PC;
-            cpu->SP--;
-            /* Push processor status (B flag clear for IRQ) */
-            mem[0x100 | cpu->SP] = cpu->P & ~FLAG_B;
-            cpu->SP--;
+
+            /* SECURITY FIX: Use safe stack operations */
+            if (!stack_push(vm, (uint8_t)(cpu->PC >> 8))) return;  /* Push PC high byte */
+            if (!stack_push(vm, (uint8_t)cpu->PC)) return;         /* Push PC low byte */
+            if (!stack_push(vm, cpu->P & ~FLAG_B)) return;         /* Push status (B clear for IRQ) */
             
             /* Set interrupt disable flag */
             cpu->P |= FLAG_I;
@@ -4340,14 +4370,11 @@ static void cpu_execute(VM* vm) {
                 uint16_t addr = mem[cpu->PC] | (mem[cpu->PC+1] << 8);
                 cpu->PC += 2;
                 uint16_t ret_addr = cpu->PC - 1;  // 6502 convention: push PC-1
-                
-                /* Push high byte FIRST */
-                mem[0x100 | cpu->SP] = (uint8_t)(ret_addr >> 8);
-                cpu->SP--;
-                /* Push low byte SECOND */
-                mem[0x100 | cpu->SP] = (uint8_t)ret_addr;
-                cpu->SP--;
-                
+
+                /* SECURITY FIX: Use safe stack operations */
+                if (!stack_push(vm, (uint8_t)(ret_addr >> 8))) return;  /* Push high byte */
+                if (!stack_push(vm, (uint8_t)ret_addr)) return;         /* Push low byte */
+
                 cpu->PC = addr;
                 break;
             }
@@ -4602,15 +4629,17 @@ static void cpu_execute(VM* vm) {
 
             /* PHP - Push Processor Status */
             case 0x08: {
-                mem[0x100 | cpu->SP] = cpu->P | FLAG_B;  /* B flag set when pushed by PHP */
-                cpu->SP--;
+                /* SECURITY FIX: Use safe stack push */
+                if (!stack_push(vm, cpu->P | FLAG_B)) return;  /* B flag set when pushed by PHP */
                 break;
             }
 
             /* PLP - Pull Processor Status */
             case 0x28: {
-                cpu->SP++;
-                cpu->P = mem[0x100 | cpu->SP];
+                /* SECURITY FIX: Use safe stack pop */
+                uint8_t temp;
+                if (!stack_pop(vm, &temp)) return;
+                cpu->P = temp;
                 cpu->P |= FLAG_U;   /* U flag always set */
                 cpu->P &= ~FLAG_B;  /* B flag always clear after PLP */
                 break;
@@ -4752,28 +4781,23 @@ static void cpu_execute(VM* vm) {
 
             /* RTI - Return from Interrupt (UPDATED) */
             case 0x40: { /* RTI */
-                /* Pop status flags first */
-                cpu->SP++;
-                cpu->P = mem[0x100 | cpu->SP];
+                /* SECURITY FIX: Use safe stack pop */
+                uint8_t status, lo, hi;
+                if (!stack_pop(vm, &status)) return;  /* Pop status flags first */
+                cpu->P = status;
                 cpu->P |= FLAG_U;
-                /* Pop low byte */
-                cpu->SP++;
-                uint8_t lo = mem[0x100 | cpu->SP];
-                /* Pop high byte */
-                cpu->SP++;
-                uint8_t hi = mem[0x100 | cpu->SP];
+                if (!stack_pop(vm, &lo)) return;      /* Pop low byte */
+                if (!stack_pop(vm, &hi)) return;      /* Pop high byte */
                 cpu->PC = lo | (hi << 8);
                 break;
             }
 
             /* RTS */
             case 0x60: { /* RTS */
-                /* Pop low byte (at current SP+1) */
-                cpu->SP++;
-                uint8_t lo = mem[0x100 | cpu->SP];
-                /* Pop high byte (at current SP+1) */
-                cpu->SP++;
-                uint8_t hi = mem[0x100 | cpu->SP];
+                /* SECURITY FIX: Use safe stack pop */
+                uint8_t lo, hi;
+                if (!stack_pop(vm, &lo)) return;   /* Pop low byte */
+                if (!stack_pop(vm, &hi)) return;   /* Pop high byte */
                 cpu->PC = (lo | (hi << 8)) + 1;
                 break;
             }
@@ -5421,14 +5445,14 @@ static void cpu_execute(VM* vm) {
 
             /* Fixed Stack instructions */
             case 0x48: { /* PHA */
-                mem[0x100 | cpu->SP] = cpu->A;
-                cpu->SP--;
+                /* SECURITY FIX: Use safe stack push */
+                if (!stack_push(vm, cpu->A)) return;
                 break;
             }
 
             case 0x68: { /* PLA - Fixed flag setting */
-                cpu->SP++;
-                cpu->A = mem[0x100 | cpu->SP];
+                /* SECURITY FIX: Use safe stack pop */
+                if (!stack_pop(vm, &cpu->A)) return;
                 cpu->P = (cpu->P & ~(FLAG_Z|FLAG_N)) |
                          (cpu->A == 0 ? FLAG_Z : 0) |
                          (cpu->A & 0x80 ? FLAG_N : 0);
